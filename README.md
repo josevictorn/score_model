@@ -8,7 +8,9 @@ Modelo de **regressão linear** que prevê a **pontuação no teste final** de u
 .
 ├── datasets/
 │   └── test_score.csv     # 101 registros: horas_estudo, pontuacao_teste
-├── score_model.ipynb      # Notebook com todo o pipeline (EDA → treino → validação)
+├── score_model.ipynb      # Notebook com o pipeline (EDA → treino → validação → serialização)
+├── score_model.pkl        # Modelo treinado, serializado com joblib
+├── api_score_model.py     # API FastAPI que serve o modelo (POST /predict)
 ├── Pipfile / Pipfile.lock # Dependências (pipenv)
 └── README.md
 ```
@@ -30,9 +32,9 @@ Modelo de **regressão linear** que prevê a **pontuação no teste final** de u
 | 2 | Análise exploratória (EDA)         | ✅ Concluído |
 | 3 | Preparar datasets de treino e teste| ✅ Concluído |
 | 4 | Treinar o modelo                   | ✅ Concluído |
-| 5 | Validar o modelo (métricas + resíduos) | ✅ Concluído — ver ressalvas abaixo |
-| 6 | Salvar o modelo                    | ⏳ Pendente  |
-| 7 | Entregar o modelo via API          | ⏳ Pendente  |
+| 5 | Validar o modelo (métricas + resíduos) | ✅ Concluído |
+| 6 | Salvar o modelo                    | ✅ Concluído |
+| 7 | Entregar o modelo via API          | ✅ Concluído |
 
 ### 1. Carregar os dados
 Leitura de `datasets/test_score.csv` com pandas.
@@ -82,19 +84,48 @@ O modelo explica ~98% da variância da pontuação.
 | Kolmogorov-Smirnov (notebook) | resíduos brutos vs N(0, 1) | 0,484       | 3,4 × 10⁻⁷  | Rejeita normalidade  |
 | Kolmogorov-Smirnov (corrigido)| resíduos padronizados vs N(0, 1) | 0,127 | 0,657   | Não rejeita normalidade |
 
-### 6. Salvar o modelo — pendente
-Sugestão: serializar com `joblib.dump(reg_model, 'models/score_model.pkl')`.
+### 6. Salvar o modelo
+Na seção *Deployment* do notebook, o modelo treinado é serializado com joblib:
 
-### 7. Entregar via API — pendente
-As dependências já estão no Pipfile (`fastapi`, `uvicorn`, `pydantic`). Sugestão de contrato:
-
-```
-POST /predict
-{ "horas_estudo": 12.5 }
-→ { "pontuacao_prevista": 204.0 }
+```python
+joblib.dump(reg_model, './score_model.pkl')
 ```
 
-Validar a entrada para aceitar apenas horas dentro da faixa observada no treino (≈ 1 a 47 h), já que fora dela o modelo extrapola.
+O arquivo `score_model.pkl` é versionado no repositório. Ele foi treinado só com os 70 registros de treino; o modelo não é reajustado com a base completa antes de salvar.
+
+### 7. Entregar via API
+[`api_score_model.py`](api_score_model.py) carrega `score_model.pkl` ao iniciar e expõe um endpoint com FastAPI.
+
+**`POST /predict`**
+
+Requisição:
+
+```json
+{ "study_hours": 12.5 }
+```
+
+Resposta (`200 OK`):
+
+```json
+{ "score": [204] }
+```
+
+| Campo         | Tipo        | Descrição                                       |
+|---------------|-------------|-------------------------------------------------|
+| `study_hours` | float       | Horas de estudo (obrigatório)                   |
+| `score`       | lista de int| Pontuação prevista, com um único elemento       |
+
+Se `study_hours` estiver ausente ou não for numérico, a API responde `422 Unprocessable Content` (validação do pydantic).
+
+Exemplo com curl:
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H 'Content-Type: application/json' \
+  -d '{"study_hours": 12.5}'
+```
+
+A documentação interativa (Swagger) fica em `http://127.0.0.1:8000/docs`.
 
 ## O modelo atende ao domínio?
 
@@ -122,7 +153,15 @@ pipenv install
 pipenv shell
 ```
 
-Depois, abra `score_model.ipynb` no VS Code e selecione o kernel do `.venv`. O Pipfile instala só o `ipykernel`; para usar o Jupyter fora do VS Code, rode `pipenv install notebook` antes.
+**Notebook:** abra `score_model.ipynb` no VS Code e selecione o kernel do `.venv`. O Pipfile instala só o `ipykernel`; para usar o Jupyter fora do VS Code, rode `pipenv install notebook` antes. Executar o notebook até o fim regrava `score_model.pkl`.
+
+**API:** a partir da raiz do projeto (o caminho do `.pkl` é relativo):
+
+```bash
+uvicorn api_score_model:app --reload
+```
+
+A API sobe em `http://127.0.0.1:8000`.
 
 ## Tecnologias
-pandas · scikit-learn · scipy · statsmodels · pingouin · seaborn · matplotlib · FastAPI · uvicorn · pydantic
+pandas · scikit-learn · scipy · statsmodels · pingouin · seaborn · matplotlib · joblib · FastAPI · uvicorn · pydantic
